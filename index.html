@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RiskRoute Pro v2 - 智能決策版</title>
+    
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-main: #f8fafc;
+            --brand-primary: #3b82f6;
+            --brand-hover: #2563eb;
+            --text-dark: #0f172a;
+            --text-muted: #64748b;
+            --border-light: #e2e8f0;
+            --route-a: #3b82f6;
+            --route-b: #8b5cf6;
+            --safe: #10b981;
+            --warn: #f59e0b;
+            --danger: #ef4444;
+        }
+
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; height: 100vh; overflow: hidden; background-color: var(--bg-main); flex-direction: row; }
+        
+        /* 佈局 */
+        #sidebar { width: 420px; background: #fff; box-shadow: 4px 0 15px rgba(0,0,0,0.05); display: flex; flex-direction: column; z-index: 10; height: 100%; }
+        #sidebar-scroll { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+        #map-container { flex: 1; position: relative; height: 100%; }
+        #map { width: 100%; height: 100%; }
+
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            #map-container { height: 40vh; flex: none; }
+            #sidebar { width: 100%; height: 60vh; flex: none; box-shadow: 0 -4px 15px rgba(0,0,0,0.1); border-top-left-radius: 16px; border-top-right-radius: 16px; }
+        }
+
+        /* UI 元件 */
+        .header { padding: 16px 24px; border-bottom: 1px solid var(--border-light); background: #fff; flex-shrink: 0; }
+        .header h1 { margin: 0; color: var(--text-dark); font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+        
+        .section { padding: 16px 24px; border-bottom: 1px solid var(--border-light); }
+        .section-title { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* 按鈕群組 (模式與時間) */
+        .pill-group { display: flex; background: var(--bg-main); border-radius: 8px; padding: 4px; gap: 4px; margin-bottom: 12px; }
+        .pill-btn { flex: 1; padding: 8px 0; text-align: center; border: none; background: transparent; border-radius: 6px; cursor: pointer; font-weight: 600; color: var(--text-muted); font-size: 13px; transition: all 0.2s; }
+        .pill-btn.active { background: #fff; color: var(--brand-primary); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+        /* 輸入框 */
+        .input-card { background: #f8fafc; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+        .input-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .input-row label { font-size: 13px; font-weight: 600; width: 36px; color: var(--text-dark); }
+        input { flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; outline: none; }
+        input:focus { border-color: var(--brand-primary); }
+
+        .btn-row { display: flex; gap: 10px; margin-top: 15px; }
+        .btn { padding: 12px; border: none; border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.2s; flex: 1; display: flex; justify-content: center; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--brand-primary); color: #fff; }
+        .btn-primary:hover { background: var(--brand-hover); }
+        .btn-secondary { background: #fff; color: var(--text-dark); border: 1px solid var(--border-light); }
+
+        /* 儀表板與建議卡片 */
+        #dashboard { display: none; padding: 16px 24px; background: #f1f5f9; }
+        
+        .advice-card { background: #fff; border-left: 4px solid var(--brand-primary); border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .advice-title { font-size: 14px; font-weight: 800; margin-bottom: 8px; color: var(--text-dark); display: flex; align-items: center; gap: 6px; }
+        .advice-text { font-size: 14px; color: #334155; line-height: 1.5; font-weight: 500; }
+
+        .route-card { background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--border-light); }
+        .route-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .badge { padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; color: white; }
+        
+        .score-row { display: flex; justify-content: space-between; align-items: flex-end; }
+        .score-main { font-size: 32px; font-weight: 800; line-height: 1; }
+        .trend-indicator { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px; background: #f8fafc; }
+        
+        /* 圖表區 */
+        .chart-container { position: relative; height: 160px; width: 100%; margin-top: 10px; }
+
+        /* Tooltip & Marker */
+        .marker-wrapper { position: relative; }
+        .risk-marker { width: 20px; height: 20px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.2s; }
+        .risk-marker:hover { transform: scale(1.3); z-index: 100; }
+        
+        .hover-card {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(10px);
+            background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px);
+            padding: 12px; border-radius: 12px; width: 200px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.8);
+            pointer-events: none; opacity: 0; transition: all 0.2s; z-index: 1000;
+        }
+        .marker-wrapper:hover .hover-card { opacity: 1; transform: translateX(-50%) translateY(0); }
+        
+        /* Breakdown UI */
+        .hc-header { display: flex; justify-content: space-between; align-items: center; font-weight: 800; border-bottom: 1px solid #eee; padding-bottom: 6px; margin-bottom: 6px; }
+        .breakdown-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; align-items: center; }
+        .breakdown-bar-bg { flex: 1; height: 4px; background: #e2e8f0; border-radius: 2px; margin: 0 8px; overflow: hidden; }
+        .breakdown-bar-fill { height: 100%; border-radius: 2px; }
+
+        .spinner { width: 18px; height: 18px; border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #fff; border-radius: 50%; animation: spin 0.8s linear infinite; display: none; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div class="header"><h1>🗺️ RiskRoute Pro</h1></div>
+
+        <div id="sidebar-scroll">
+            <div class="section">
+                <div class="section-title">🚗 情境模式切換</div>
+                <div class="pill-group" id="mode-controls">
+                    <button class="pill-btn active" data-mode="commute">💼 通勤 (重天氣)</button>
+                    <button class="pill-btn" data-mode="travel">🏖️ 旅行 (平衡)</button>
+                    <button class="pill-btn" data-mode="logistics">📦 物流 (重時間)</button>
+                </div>
+            </div>
+
+            <div class="section" style="border-bottom: none;">
+                <div class="section-title">📍 路線分析設置</div>
+                
+                <div class="input-card" style="border-left: 4px solid var(--route-a);">
+                    <div style="font-size:12px; font-weight:700; color:var(--route-a);">主路線 (Route A)</div>
+                    <div class="input-row"><label>起點</label><input type="text" id="startA" value="台北"></div>
+                    <div class="input-row"><label>終點</label><input type="text" id="endA" value="高雄"></div>
+                </div>
+
+                <div class="input-card" id="route-b-group" style="border-left: 4px solid var(--route-b); display:none;">
+                    <div style="font-size:12px; font-weight:700; color:var(--route-b);">替代路線 (Route B)</div>
+                    <div class="input-row"><label>起點</label><input type="text" id="startB" value="台北"></div>
+                    <div class="input-row"><label>終點</label><input type="text" id="endB" value="花蓮"></div>
+                </div>
+
+                <div class="btn-row">
+                    <button class="btn btn-secondary" id="btn-toggle-b">⚖️ 加入替代路線</button>
+                    <button class="btn btn-primary" id="btn-analyze">
+                        <span id="btn-text">開始智能分析</span>
+                        <div class="spinner" id="loading-spinner"></div>
+                    </button>
+                </div>
+            </div>
+
+            <div id="dashboard">
+                <div class="advice-card" id="ai-advice-box">
+                    <div class="advice-title">💡 AI 智能建議</div>
+                    <div class="advice-text" id="ai-advice-text">分析中...</div>
+                </div>
+                
+                <div class="route-card" id="card-a">
+                    <div class="route-header">
+                        <span class="badge" style="background:var(--route-a);">Route A 現況</span>
+                        <span id="trend-a" class="trend-indicator"></span>
+                    </div>
+                    <div class="score-row">
+                        <div>
+                            <span class="score-main" id="score-a" style="color:var(--route-a);">--</span>
+                            <span style="font-size:12px; color:var(--text-muted);">/ 10 綜合風險</span>
+                        </div>
+                        <div id="level-a" style="font-size: 13px; font-weight:700;"></div>
+                    </div>
+                </div>
+
+                <div class="route-card" id="card-b" style="display:none;">
+                    <div class="route-header">
+                        <span class="badge" style="background:var(--route-b);">Route B 現況</span>
+                        <span id="trend-b" class="trend-indicator"></span>
+                    </div>
+                    <div class="score-row">
+                        <div>
+                            <span class="score-main" id="score-b" style="color:var(--route-b);">--</span>
+                            <span style="font-size:12px; color:var(--text-muted);">/ 10 綜合風險</span>
+                        </div>
+                        <div id="level-b" style="font-size: 13px; font-weight:700;"></div>
+                    </div>
+                </div>
+
+                <div class="route-card">
+                    <div class="section-title" style="margin-bottom:0;">📈 綜合風險趨勢比較</div>
+                    <div class="chart-container"><canvas id="riskChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="map-container"><div id="map"></div></div>
+
+    <script>
+        // ==========================================
+        // 系統配置與狀態 (架構可接真實 API)
+        // ==========================================
+        const CONFIG = {
+            SAMPLE_POINTS: 10,
+            COLOR_A: '#3b82f6', COLOR_B: '#8b5cf6',
+            // 不同模式的風險權重設定
+            MODES: {
+                commute: { weather: 0.6, aqi: 0.2, time: 0.2 },
+                travel: { weather: 0.4, aqi: 0.4, time: 0.2 },
+                logistics: { weather: 0.5, aqi: 0.1, time: 0.4 }
+            }
+        };
+
+        const STATE = {
+            map: null, markers: [], chartInstance: null,
+            currentMode: 'commute', isComparing: false, isAnalyzing: false
+        };
+
+        function initMap() {
+            mapboxgl.accessToken = 'pk.eyJ1IjoiZHVtbXkiLCJhIjoiY2R1bW15In0.dummy';
+            STATE.map = new mapboxgl.Map({
+                container: 'map', style: 'mapbox://styles/mapbox/light-v11', center: [120.9820, 23.9739], zoom: 7
+            });
+            setupEvents();
+        }
+
+        // ==========================================
+        // 模擬 API 核心 (Mock Layer)
+        // ==========================================
+        const API = {
+            getCoords: async (place) => {
+                const dict = { '台北': [121.56, 25.03], '高雄': [120.30, 22.62], '台中': [120.67, 24.14], '花蓮': [121.60, 23.97] };
+                return dict[place] || dict['台北']; 
+            },
+            fetchRoute: async (start, end, isAlt) => {
+                let mid = [ (start[0]+end[0])/2, (start[1]+end[1])/2 ];
+                if(isAlt) mid[0] += 0.6;
+                return turf.bezierSpline(turf.lineString([start, mid, end]));
+            },
+            // 核心：取得包含 Breakdown 的數據，並支援時間偏移預測
+            fetchRiskData: async (timeOffset, modeKey) => {
+                const weights = CONFIG.MODES[modeKey];
+                
+                // 模擬基礎數據
+                const wList = [{c:'晴天',i:'☀️',s:1}, {c:'多雲',i:'☁️',s:4}, {c:'降雨',i:'🌧️',s:7}, {c:'暴風',i:'⛈️',s:10}];
+                const w = wList[Math.floor(Math.random() * wList.length)];
+                const aqi = Math.floor(Math.random() * 5) + 1; // 1-5
+                const aqiScore = aqi * 2; // 轉換至 10 分制
+                
+                // 時間變化邏輯 (夜間或尖峰時刻風險提升)
+                const targetHour = (new Date().getHours() + timeOffset) % 24;
+                const isHighRiskTime = targetHour >= 18 || targetHour <= 6; 
+                const timeScore = isHighRiskTime ? 9 : 2;
+
+                // 權重計算
+                const wRisk = w.s * weights.weather;
+                const aRisk = aqiScore * weights.aqi;
+                const tRisk = timeScore * weights.time;
+                let total = wRisk + aRisk + tRisk + ((Math.random()*2-1)*0.1); // 加入微小波動
+                total = Math.max(0, Math.min(10, total));
+
+                return {
+                    total: parseFloat(total.toFixed(1)),
+                    weather: { name: w.c, icon: w.i, raw: w.s, weighted: wRisk },
+                    aqi: { raw: aqi, weighted: aRisk },
+                    time: { isPeak: isHighRiskTime, weighted: tRisk },
+                    breakdown: { w: weights.weather, a: weights.aqi, t: weights.time } // 回傳權重用於 UI 顯示
+                };
+            }
+        };
+
+        // ==========================================
+        // 互動與運算邏輯
+        // ==========================================
+        function setupEvents() {
+            document.querySelectorAll('#mode-controls .pill-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('#mode-controls .pill-btn').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    STATE.currentMode = e.target.dataset.mode;
+                    // 若已分析過，切換模式直接重新分析
+                    if(document.getElementById('dashboard').style.display === 'block') executeAnalysis();
+                });
+            });
+
+            const btnToggle = document.getElementById('btn-toggle-b');
+            btnToggle.addEventListener('click', () => {
+                STATE.isComparing = !STATE.isComparing;
+                document.getElementById('route-b-group').style.display = STATE.isComparing ? 'block' : 'none';
+                btnToggle.innerHTML = STATE.isComparing ? '❌ 移除替代路線' : '⚖️ 加入替代路線';
+            });
+
+            document.getElementById('btn-analyze').addEventListener('click', executeAnalysis);
+        }
+
+        async function executeAnalysis() {
+            if (STATE.isAnalyzing) return;
+            setLoading(true); UI.clear();
+
+            try {
+                // 主路線運算
+                const sA = await API.getCoords(document.getElementById('startA').value);
+                const eA = await API.getCoords(document.getElementById('endA').value);
+                const resA = await analyzeRouteTrends(sA, eA, 'A', CONFIG.COLOR_A, false);
+                UI.renderCard('a', resA);
+
+                let resB = null;
+                if (STATE.isComparing) {
+                    const sB = await API.getCoords(document.getElementById('startB').value);
+                    const eB = await API.getCoords(document.getElementById('endB').value);
+                    resB = await analyzeRouteTrends(sB, eB, 'B', CONFIG.COLOR_B, true);
+                    UI.renderCard('b', resB);
+                }
+
+                // 產出智能決策建議
+                UI.generateAdvice(resA, resB);
+                UI.renderChart(resA, resB);
+                UI.fitBounds();
+                
+                document.getElementById('dashboard').style.display = 'block';
+                if(window.innerWidth <= 768) document.getElementById('sidebar-scroll').scrollTo({top: 500, behavior: 'smooth'});
+
+            } catch (err) { alert("規劃錯誤"); console.log(err); } 
+            finally { setLoading(false); }
+        }
+
+        // 核心運算：同時計算 [現在, 1h後, 3h後] 來產生趨勢
+        async function analyzeRouteTrends(start, end, id, color, isAlt) {
+            const geoJSON = await API.fetchRoute(start, end, isAlt);
+            UI.drawLine(geoJSON, id, color);
+
+            const line = turf.lineString(geoJSON.geometry.coordinates);
+            const totalLen = turf.length(line, {units: 'kilometers'});
+            
+            let sums = { now:0, h1:0, h3:0 };
+            let spatialRisksNow = []; // 存現在的空間風險用於畫圖
+
+            for(let i=0; i<CONFIG.SAMPLE_POINTS; i++){
+                const pt = turf.along(line, (totalLen / (CONFIG.SAMPLE_POINTS - 1)) * i, {units: 'km'});
+                const coords = pt.geometry.coordinates;
+                
+                // 同時請求三個時間點的預測資料
+                const [dNow, dH1, dH3] = await Promise.all([
+                    API.fetchRiskData(0, STATE.currentMode),
+                    API.fetchRiskData(1, STATE.currentMode),
+                    API.fetchRiskData(3, STATE.currentMode)
+                ]);
+
+                sums.now += dNow.total; sums.h1 += dH1.total; sums.h3 += dH3.total;
+                spatialRisksNow.push(dNow.total);
+                
+                // 地圖上只繪製「現在」的 Marker 及其 Breakdown
+                UI.drawMarker(coords, dNow, color);
+            }
+
+            const avgNow = parseFloat((sums.now / CONFIG.SAMPLE_POINTS).toFixed(1));
+            const avgH1 = parseFloat((sums.h1 / CONFIG.SAMPLE_POINTS).toFixed(1));
+            const avgH3 = parseFloat((sums.h3 / CONFIG.SAMPLE_POINTS).toFixed(1));
+
+            // 計算趨勢 (現在 vs 1小時後)
+            const diff = avgH1 - avgNow;
+            let trend = 'flat';
+            if (diff > 0.5) trend = 'up';
+            else if (diff < -0.5) trend = 'down';
+
+            return { id, avgNow, avgH1, avgH3, trend, spatialRisksNow };
+        }
+
+        // ==========================================
+        // UI 渲染器
+        // ==========================================
+        const UI = {
+            clear: () => {
+                ['A','B'].forEach(id => {
+                    if(STATE.map.getSource(`route${id}`)){
+                        STATE.map.removeLayer(`route${id}`).removeSource(`route${id}`);
+                    }
+                });
+                STATE.markers.forEach(m => m.remove()); STATE.markers = [];
+                document.getElementById('card-b').style.display = 'none';
+            },
+
+            drawLine: (geo, id, color) => {
+                STATE.map.addSource(`route${id}`, {type:'geojson', data:geo});
+                STATE.map.addLayer({id:`route${id}`, type:'line', source:`route${id}`, paint:{'line-color':color, 'line-width':5}});
+            },
+
+            // 繪製 Breakdown Tooltip
+            drawMarker: (coords, data, color) => {
+                let rColor = 'var(--safe)'; if(data.total >= 4) rColor = 'var(--warn)'; if(data.total >= 7) rColor = 'var(--danger)';
+                const el = document.createElement('div'); el.className = 'marker-wrapper';
+                const dot = document.createElement('div'); dot.className = 'risk-marker'; 
+                dot.style.backgroundColor = rColor; dot.style.borderColor = color;
+
+                // 產生長條圖寬度比例
+                const wPct = (data.weather.weighted / 10) * 100;
+                const aPct = (data.aqi.weighted / 10) * 100;
+                const tPct = (data.time.weighted / 10) * 100;
+
+                const card = document.createElement('div'); card.className = 'hover-card';
+                card.innerHTML = `
+                    <div class="hc-header">
+                        <span>綜合風險</span><span style="color:${rColor}; font-size:16px;">${data.total}</span>
+                    </div>
+                    <div class="breakdown-row"><span>${data.weather.icon} 天氣 (${data.breakdown.w*10})</span><div class="breakdown-bar-bg"><div class="breakdown-bar-fill" style="width:${wPct}%; background:#3b82f6;"></div></div><span>${data.weather.raw}</span></div>
+                    <div class="breakdown-row"><span>😷 空污 (${data.breakdown.a*10})</span><div class="breakdown-bar-bg"><div class="breakdown-bar-fill" style="width:${aPct}%; background:#8b5cf6;"></div></div><span>${data.aqi.raw}</span></div>
+                    <div class="breakdown-row"><span>🕒 時段 (${data.breakdown.t*10})</span><div class="breakdown-bar-bg"><div class="breakdown-bar-fill" style="width:${tPct}%; background:#f59e0b;"></div></div><span>${data.time.isPeak?'夜':'日'}</span></div>
+                `;
+                el.appendChild(dot); el.appendChild(card);
+                STATE.markers.push(new mapboxgl.Marker({element:el}).setLngLat(coords).addTo(STATE.map));
+            },
+
+            renderCard: (id, res) => {
+                document.getElementById(`card-${id}`).style.display = 'block';
+                document.getElementById(`score-${id}`).innerText = res.avgNow;
+                
+                // 狀態顯示
+                const lvl = document.getElementById(`level-${id}`);
+                if (res.avgNow < 4) { lvl.innerText = "🟢 狀況良好"; lvl.style.color = "var(--safe)"; }
+                else if (res.avgNow < 7) { lvl.innerText = "🟡 建議留意"; lvl.style.color = "var(--warn)"; }
+                else { lvl.innerText = "🔴 高度風險"; lvl.style.color = "var(--danger)"; }
+
+                // 趨勢顯示
+                const trendEl = document.getElementById(`trend-${id}`);
+                if(res.trend === 'up') { trendEl.innerHTML = '📈 1小時後上升'; trendEl.style.color = 'var(--danger)'; trendEl.style.background = '#fee2e2'; }
+                else if(res.trend === 'down') { trendEl.innerHTML = '📉 1小時後下降'; trendEl.style.color = 'var(--safe)'; trendEl.style.background = '#d1fae5'; }
+                else { trendEl.innerHTML = '➡️ 趨勢平穩'; trendEl.style.color = 'var(--text-muted)'; trendEl.style.background = '#f1f5f9'; }
+            },
+
+            // ✨ AI 行動建議引擎
+            generateAdvice: (resA, resB) => {
+                const box = document.getElementById('ai-advice-box');
+                const text = document.getElementById('ai-advice-text');
+                
+                let advice = "";
+                let boxBorder = 'var(--brand-primary)';
+
+                // 判斷比較邏輯
+                if (resB && resB.avgNow < resA.avgNow - 1) {
+                    advice = `<strong>建議切換至替代路線 (Route B)。</strong><br>主路線風險較高 (${resA.avgNow})，替代路線目前較為安全 (${resB.avgNow})。`;
+                    boxBorder = 'var(--route-b)';
+                } else if (resA.avgNow >= 7) {
+                    if (resA.trend === 'down') {
+                        advice = `<strong>強烈建議延後出發。</strong><br>目前處於高風險區間 (${resA.avgNow})，但預測 1 小時後風險將會下降至 ${resA.avgH1}。`;
+                        boxBorder = 'var(--warn)';
+                    } else {
+                        advice = `<strong>⚠️ 警告：目前極不建議出發。</strong><br>沿路遭遇極端高風險，且未來時段未見好轉，請考慮取消或更換交通方式。`;
+                        boxBorder = 'var(--danger)';
+                    }
+                } else if (resA.trend === 'up' && resA.avgNow < 5) {
+                    advice = `<strong>建議立即出發。</strong><br>目前路況與天氣良好，但預測 1 小時後風險將開始攀升 (至 ${resA.avgH1})，請把握安全空檔。`;
+                    boxBorder = 'var(--safe)';
+                } else {
+                    advice = `<strong>可以按原定計畫出發。</strong><br>整趟路程風險在可控範圍內，未來趨勢相對平穩，請安心駕駛。`;
+                    boxBorder = 'var(--safe)';
+                }
+
+                box.style.borderLeftColor = boxBorder;
+                text.innerHTML = advice;
+            },
+
+            renderChart: (resA, resB) => {
+                const ctx = document.getElementById('riskChart').getContext('2d');
+                if (STATE.chartInstance) STATE.chartInstance.destroy();
+                
+                const labels = Array.from({length: CONFIG.SAMPLE_POINTS}, (_, i) => `段落 ${i+1}`);
+                const datasets = [{
+                    label: '主路線', data: resA.spatialRisksNow,
+                    borderColor: CONFIG.COLOR_A, backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4, fill: true
+                }];
+
+                if (resB) {
+                    datasets.push({
+                        label: '替代路線', data: resB.spatialRisksNow,
+                        borderColor: CONFIG.COLOR_B, backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        tension: 0.4, fill: true
+                    });
+                }
+
+                STATE.chartInstance = new Chart(ctx, {
+                    type: 'line', data: { labels, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 10 } } }
+                });
+            },
+
+            fitBounds: () => {
+                if(STATE.markers.length === 0) return;
+                const b = new mapboxgl.LngLatBounds();
+                STATE.markers.forEach(m => b.extend(m.getLngLat()));
+                STATE.map.fitBounds(b, {padding: 60});
+            }
+        };
+
+        function setLoading(isLoading) {
+            STATE.isAnalyzing = isLoading;
+            document.getElementById('btn-analyze').disabled = isLoading;
+            document.getElementById('btn-text').style.display = isLoading ? 'none' : 'block';
+            document.getElementById('loading-spinner').style.display = isLoading ? 'block' : 'none';
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
