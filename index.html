@@ -72,6 +72,26 @@ let map;
 let directionsService;
 let directionsRenderer;
 
+// ✅ 決策邏輯
+function makeDecision(fast, safe) {
+  if (safe < fast) {
+    return {
+      decision: "安全路線",
+      reason: "整體風險較低"
+    };
+  } else {
+    return {
+      decision: "最快路線",
+      reason: "時間效率較高"
+    };
+  }
+}
+
+// ✅ 假AI（先測流程）
+function fakeAI(decision, reason) {
+  return `建議選擇${decision}，因為${reason}`;
+}
+
 function initMap() {
   map = new google.maps.Map(document.getElementById("map"), {
     center: { lat: 25.0330, lng: 121.5654 },
@@ -120,9 +140,20 @@ function analyzeRoute(route, type) {
   } else {
     document.getElementById("safeScore").innerText = score;
   }
+
+  // ✅ 當兩個都有數值 → 做決策
+  const fast = parseInt(document.getElementById("fastScore").innerText);
+  const safe = parseInt(document.getElementById("safeScore").innerText);
+
+  if (fast > 0 && safe > 0) {
+    const result = makeDecision(fast, safe);
+    const text = fakeAI(result.decision, result.reason);
+
+    alert(text); // 👉 先用 alert 測試
+  }
 }
 
-// 👉 Demo用（之後可接真API）
+// 👉 Demo用（之後會換掉）
 function simulateRisk(point) {
   return Math.floor(Math.random() * 10);
 }
