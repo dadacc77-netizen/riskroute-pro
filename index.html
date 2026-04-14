@@ -23,6 +23,34 @@
       gap:10px;
     }
 
+    #scoreCard {
+      position:absolute;
+      bottom:80px;
+      left:50%;
+      transform:translateX(-50%);
+      background:white;
+      padding:12px 18px;
+      border-radius:15px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.2);
+      z-index:10;
+      font-size:16px;
+    }
+
+    #aiCard {
+      position:absolute;
+      bottom:20px;
+      left:50%;
+      transform:translateX(-50%);
+      background:#111;
+      color:#00ff88;
+      padding:15px 20px;
+      border-radius:15px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.3);
+      z-index:10;
+      max-width:90%;
+      font-size:15px;
+    }
+
     input {
       padding:8px;
       border-radius:8px;
@@ -35,19 +63,6 @@
       border-radius:8px;
       background:#007bff;
       color:white;
-    }
-
-    #scoreCard {
-      position:absolute;
-      bottom:20px;
-      left:50%;
-      transform:translateX(-50%);
-      background:white;
-      padding:15px;
-      border-radius:15px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.2);
-      z-index:10;
-      font-size:18px;
     }
   </style>
 </head>
@@ -65,6 +80,8 @@
   🛡 安全：<span id="safeScore">0</span>
 </div>
 
+<div id="aiCard">AI分析：等待路線計算...</div>
+
 <div id="map"></div>
 
 <script>
@@ -72,24 +89,52 @@ let map;
 let directionsService;
 let directionsRenderer;
 
-// ✅ 決策邏輯
 function makeDecision(fast, safe) {
   if (safe < fast) {
-    return {
-      decision: "安全路線",
-      reason: "整體風險較低"
-    };
+    return { decision: "安全路線", reason: "整體風險較低" };
   } else {
-    return {
-      decision: "最快路線",
-      reason: "時間效率較高"
-    };
+    return { decision: "最快路線", reason: "時間效率較高" };
   }
 }
 
-// ✅ 假AI（先測流程）
-function fakeAI(decision, reason) {
-  return `建議選擇${decision}，因為${reason}`;
+function showAI(text) {
+  document.getElementById("aiCard").innerText = "AI分析：" + text;
+}
+
+async function callAI(decision, reason) {
+  showAI("分析中...");
+
+  try {
+    const res = await fetch("https://riskroute-ai.onrender.com/ai", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ decision, reason })
+    });
+
+    const data = await res.json();
+    showAI(data.text);
+
+  } catch (e) {
+    showAI("AI暫時無法使用");
+  }
+}
+
+function getWeatherRisk() {
+  const rand = Math.random();
+  if (rand > 0.8) return 8;
+  if (rand > 0.5) return 4;
+  return 0;
+}
+
+function getCrimeRisk(lat, lng) {
+  let risk = 0;
+
+  if (lat > 25.03 && lat < 25.05) risk += 6;
+  if (lng % 0.01 < 0.005) risk += 5;
+
+  return risk;
 }
 
 function initMap() {
@@ -113,19 +158,18 @@ function calcRoute() {
     provideRouteAlternatives: true
   }, (result, status) => {
 
-if (status === "OK") {
+    if (status === "OK") {
 
-  // ✅ 先畫出路線（這行超重要）
-  directionsRenderer.setDirections(result);
+      directionsRenderer.setDirections(result);
 
-  const routes = result.routes;
+      const routes = result.routes;
 
-  analyzeRoute(routes[0], "fast");
+      analyzeRoute(routes[0], "fast");
 
-  if (routes[1]) {
-    analyzeRoute(routes[1], "safe");
-  }
-}
+      if (routes[1]) {
+        analyzeRoute(routes[1], "safe");
+      }
+    }
   });
 }
 
@@ -135,7 +179,10 @@ function analyzeRoute(route, type) {
 
   path.forEach((point, i) => {
     if (i % 5 === 0) {
-      score += simulateRisk(point);
+
+      score += Math.floor(Math.random() * 5);
+      score += getCrimeRisk(point.lat(), point.lng());
+      score += getWeatherRisk();
     }
   });
 
@@ -145,21 +192,13 @@ function analyzeRoute(route, type) {
     document.getElementById("safeScore").innerText = score;
   }
 
-  // ✅ 當兩個都有數值 → 做決策
   const fast = parseInt(document.getElementById("fastScore").innerText);
   const safe = parseInt(document.getElementById("safeScore").innerText);
 
-  if (fast > 0 && safe > 0) {
+  if (fast !== 0 || safe !== 0) {
     const result = makeDecision(fast, safe);
-    const text = fakeAI(result.decision, result.reason);
-
-    alert(text); // 👉 先用 alert 測試
+    callAI(result.decision, result.reason);
   }
-}
-
-// 👉 Demo用（之後會換掉）
-function simulateRisk(point) {
-  return Math.floor(Math.random() * 10);
 }
 </script>
 
