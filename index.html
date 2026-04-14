@@ -89,6 +89,11 @@ let map;
 let directionsService;
 let directionsRenderer;
 
+// 🔥 控制AI呼叫（省錢）
+let hasCalledAI = false;
+let lastDecision = "";
+
+// 🧠 決策
 function makeDecision(fast, safe) {
   if (safe < fast) {
     return { decision: "安全路線", reason: "整體風險較低" };
@@ -97,10 +102,12 @@ function makeDecision(fast, safe) {
   }
 }
 
+// 🤖 UI顯示
 function showAI(text) {
   document.getElementById("aiCard").innerText = "AI分析：" + text;
 }
 
+// 🤖 AI呼叫（已加防刷 header）
 async function callAI(decision, reason) {
   showAI("分析中...");
 
@@ -108,7 +115,8 @@ async function callAI(decision, reason) {
     const res = await fetch("https://riskroute-ai.onrender.com/ai", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-api-key": "mysecret123"
       },
       body: JSON.stringify({ decision, reason })
     });
@@ -121,6 +129,7 @@ async function callAI(decision, reason) {
   }
 }
 
+// 🌧️ 天氣風險
 function getWeatherRisk() {
   const rand = Math.random();
   if (rand > 0.8) return 8;
@@ -128,6 +137,7 @@ function getWeatherRisk() {
   return 0;
 }
 
+// 🚨 犯罪風險
 function getCrimeRisk(lat, lng) {
   let risk = 0;
 
@@ -148,8 +158,12 @@ function initMap() {
 }
 
 function calcRoute() {
+  hasCalledAI = false;
+
   const start = document.getElementById("start").value;
   const end = document.getElementById("end").value;
+
+  if (!start || !end) return;
 
   directionsService.route({
     origin: start,
@@ -179,7 +193,6 @@ function analyzeRoute(route, type) {
 
   path.forEach((point, i) => {
     if (i % 5 === 0) {
-
       score += Math.floor(Math.random() * 5);
       score += getCrimeRisk(point.lat(), point.lng());
       score += getWeatherRisk();
@@ -195,9 +208,16 @@ function analyzeRoute(route, type) {
   const fast = parseInt(document.getElementById("fastScore").innerText);
   const safe = parseInt(document.getElementById("safeScore").innerText);
 
-  if (fast !== 0 || safe !== 0) {
+  if ((fast !== 0 || safe !== 0) && !hasCalledAI) {
+    hasCalledAI = true;
+
     const result = makeDecision(fast, safe);
-    callAI(result.decision, result.reason);
+    const key = result.decision + result.reason;
+
+    if (key !== lastDecision) {
+      lastDecision = key;
+      callAI(result.decision, result.reason);
+    }
   }
 }
 </script>
