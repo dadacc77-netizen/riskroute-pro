@@ -1,241 +1,136 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
-  <meta charset="UTF-8">
+  <title>RiskRoute Pro</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>進階版 Google 地圖應用</title>
+
   <style>
-    /* 重置基本樣式 */
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    body { margin:0; font-family:sans-serif; }
+
+    #map { height:100vh; width:100%; }
+
+    #searchCard {
+      position:absolute;
+      top:20px;
+      left:50%;
+      transform:translateX(-50%);
+      background:white;
+      padding:15px;
+      border-radius:15px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.2);
+      z-index:10;
+      display:flex;
+      gap:10px;
     }
 
-    /* 地圖滿版 */
-    #map {
-      height: 100vh;
-      width: 100%;
+    input {
+      padding:8px;
+      border-radius:8px;
+      border:1px solid #ccc;
     }
 
-    /* ==========================================
-       自訂地圖控制元件樣式 (懸浮 UI)
-       ========================================== */
-    .custom-controls-container {
-      margin-top: 15px;
-      margin-left: 15px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
+    button {
+      padding:8px 12px;
+      border:none;
+      border-radius:8px;
+      background:#007bff;
+      color:white;
     }
 
-    /* 現代化搜尋框 */
-    .search-input {
-      width: 320px;
-      padding: 14px 20px;
-      font-size: 16px;
-      border: none;
-      border-radius: 30px;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-      outline: none;
-      transition: all 0.3s ease;
-      background-color: #ffffff;
-      color: #333;
-    }
-
-    .search-input:focus {
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-      transform: translateY(-2px);
-    }
-
-    .search-input::placeholder {
-      color: #999;
-    }
-
-    /* 定位按鈕 */
-    .locate-btn {
-      background: white;
-      border: none;
-      border-radius: 50%;
-      width: 48px;
-      height: 48px;
-      font-size: 20px;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-      cursor: pointer;
-      transition: all 0.3s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .locate-btn:hover {
-      background: #f8f9fa;
-      transform: translateY(-2px);
-      color: #4285F4;
-    }
-
-    /* 資訊視窗 (InfoWindow) 內部樣式 */
-    .info-window-content {
-      padding: 5px;
-      max-width: 250px;
-    }
-    .info-window-content h3 {
-      margin: 0 0 8px 0;
-      font-size: 16px;
-      color: #222;
-    }
-    .info-window-content p {
-      margin: 0;
-      font-size: 13px;
-      color: #666;
-      line-height: 1.4;
-    }
-    .info-window-content .rating {
-      margin-top: 8px;
-      color: #f39c12;
-      font-weight: bold;
-      font-size: 14px;
+    #scoreCard {
+      position:absolute;
+      bottom:20px;
+      left:50%;
+      transform:translateX(-50%);
+      background:white;
+      padding:15px;
+      border-radius:15px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.2);
+      z-index:10;
+      font-size:18px;
     }
   </style>
 </head>
+
 <body>
 
-<!-- 將輸入框與按鈕準備好，稍後會透過 JS 塞入地圖中 -->
-<div id="ui-container" class="custom-controls-container">
-  <input id="searchBox" class="search-input" type="text" placeholder="🔍 搜尋地點、餐廳或地標...">
-  <button id="locateMeBtn" class="locate-btn" title="定位我的位置">📍</button>
+<div id="searchCard">
+  <input id="start" placeholder="起點">
+  <input id="end" placeholder="終點">
+  <button onclick="calcRoute()">開始</button>
+</div>
+
+<div id="scoreCard">
+  ⚡ 最快：<span id="fastScore">0</span>　
+  🛡 安全：<span id="safeScore">0</span>
 </div>
 
 <div id="map"></div>
 
 <script>
+let map;
+let directionsService;
+let directionsRenderer;
+
 function initMap() {
-  // 1. 初始化地圖 (關閉一些預設的雜亂按鈕，讓版面更乾淨)
-  const mapOptions = {
-    center: { lat: 22.6273, lng: 120.3014 }, // 高雄
-    zoom: 14,
-    mapTypeControl: false, // 隱藏「地圖/衛星」切換
-    fullscreenControl: false,
-    streetViewControl: true, // 保留街景小人
-    zoomControl: true,
-  };
-  const map = new google.maps.Map(document.getElementById("map"), mapOptions);
-
-  // 2. 將自訂 UI 注入到地圖的左上方
-  const uiContainer = document.getElementById("ui-container");
-  map.controls[google.maps.ControlPosition.TOP_LEFT].push(uiContainer);
-
-  const input = document.getElementById("searchBox");
-  const locateBtn = document.getElementById("locateMeBtn");
-  const searchBox = new google.maps.places.SearchBox(input);
-  
-  let markers = [];
-  // 建立共用的資訊視窗 (InfoWindow)
-  const infoWindow = new google.maps.InfoWindow();
-
-  // 3. 當地圖範圍改變時，優先搜尋畫面中的區域
-  map.addListener("bounds_changed", () => {
-    searchBox.setBounds(map.getBounds());
+  map = new google.maps.Map(document.getElementById("map"), {
+    center: { lat: 25.0330, lng: 121.5654 },
+    zoom: 13,
   });
 
-  // 4. 監聽搜尋框事件
-  searchBox.addListener("places_changed", () => {
-    const places = searchBox.getPlaces();
-    if (places.length === 0) return;
+  directionsService = new google.maps.DirectionsService();
+  directionsRenderer = new google.maps.DirectionsRenderer({ map });
+}
 
-    // 清除舊標記
-    markers.forEach(marker => marker.setMap(null));
-    markers = [];
+function calcRoute() {
+  const start = document.getElementById("start").value;
+  const end = document.getElementById("end").value;
 
-    const bounds = new google.maps.LatLngBounds();
+  directionsService.route({
+    origin: start,
+    destination: end,
+    travelMode: "WALKING",
+    provideRouteAlternatives: true
+  }, (result, status) => {
 
-    places.forEach(place => {
-      if (!place.geometry || !place.geometry.location) return;
+    if (status === "OK") {
+      const routes = result.routes;
 
-      // 建立新的圖釘 (加上掉落動畫)
-      const marker = new google.maps.Marker({
-        map,
-        title: place.name,
-        position: place.geometry.location,
-        animation: google.maps.Animation.DROP 
-      });
+      analyzeRoute(routes[0], "fast");
 
-      // 點擊圖釘時顯示詳細資訊
-      marker.addListener("click", () => {
-        const ratingHtml = place.rating ? `<div class="rating">⭐ ${place.rating} / 5.0</div>` : "";
-        const address = place.formatted_address || "無詳細地址資訊";
-        
-        const content = `
-          <div class="info-window-content">
-            <h3>${place.name}</h3>
-            <p>${address}</p>
-            ${ratingHtml}
-          </div>
-        `;
-        infoWindow.setContent(content);
-        infoWindow.open(map, marker);
-      });
-
-      markers.push(marker);
-
-      if (place.geometry.viewport) {
-        bounds.union(place.geometry.viewport);
-      } else {
-        bounds.extend(place.geometry.location);
+      if (routes[1]) {
+        analyzeRoute(routes[1], "safe");
       }
-    });
-
-    map.fitBounds(bounds);
-  });
-
-  // 5. 實作「我的位置」按鈕功能 (HTML5 Geolocation)
-  locateBtn.addEventListener("click", () => {
-    if (navigator.geolocation) {
-      locateBtn.innerHTML = "⏳"; // 顯示讀取中
-      
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const pos = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
-          
-          map.setCenter(pos);
-          map.setZoom(16);
-          
-          // 在目前位置畫一個特製的藍色小圓點
-          new google.maps.Marker({
-            position: pos,
-            map: map,
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillOpacity: 1,
-              strokeWeight: 2,
-              fillColor: '#4285F4', // Google 藍
-              strokeColor: '#ffffff',
-            },
-            title: "你目前的位置",
-            animation: google.maps.Animation.DROP
-          });
-          
-          locateBtn.innerHTML = "📍"; // 恢復按鈕圖示
-        },
-        () => {
-          alert("無法獲取您的位置，請確認是否開啟定位權限。");
-          locateBtn.innerHTML = "📍";
-        }
-      );
-    } else {
-      alert("您的瀏覽器不支援地理位置功能。");
     }
   });
 }
+
+function analyzeRoute(route, type) {
+  let score = 0;
+  const path = route.overview_path;
+
+  path.forEach((point, i) => {
+    if (i % 5 === 0) {
+      score += simulateRisk(point);
+    }
+  });
+
+  if (type === "fast") {
+    document.getElementById("fastScore").innerText = score;
+  } else {
+    document.getElementById("safeScore").innerText = score;
+  }
+}
+
+// 👉 Demo用（之後可接真API）
+function simulateRisk(point) {
+  return Math.floor(Math.random() * 10);
+}
 </script>
 
-<!-- API 金鑰載入 -->
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCMOOS5xt_lxybTNnS7tpcS55yYFjgHNaY&libraries=places&callback=initMap" async defer></script>
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=你的APIKEY&libraries=places&callback=initMap">
+</script>
 
 </body>
 </html>
