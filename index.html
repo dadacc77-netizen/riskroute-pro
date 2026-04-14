@@ -113,15 +113,19 @@ function calcRoute() {
     provideRouteAlternatives: true
   }, (result, status) => {
 
-    if (status === "OK") {
-      const routes = result.routes;
+if (status === "OK") {
 
-      analyzeRoute(routes[0], "fast");
+  // ✅ 先畫出路線（這行超重要）
+  directionsRenderer.setDirections(result);
 
-      if (routes[1]) {
-        analyzeRoute(routes[1], "safe");
-      }
-    }
+  const routes = result.routes;
+
+  analyzeRoute(routes[0], "fast");
+
+  if (routes[1]) {
+    analyzeRoute(routes[1], "safe");
+  }
+}
   });
 }
 
